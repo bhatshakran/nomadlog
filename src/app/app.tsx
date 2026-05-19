@@ -1,17 +1,28 @@
 import React, { useState, useEffect, useRef } from "react";
 import { toPng } from "html-to-image";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
 // --- TYPES & INTERFACES ---
 type TabType = "home" | "log" | "stats" | "share" | "settings";
-type SleepLocation = "Flat/Hotel" | "Friends" | "Hotel"; // 'Hotel' included for backwards compatibility with old localStorage data
+type ExpenseType = "Ride" | "Food" | "Shopping" | "Accommodation" | string;
 
 interface Log {
   id: string;
   date: string;
-  sleptAt: SleepLocation;
-  transportSpend: number;
-  foodSpend: number;
-  notes: string;
+  time?: string;
+  type: ExpenseType;
+  amount: number;
+  details: string;
+  platform: string;
+  mode: string;
 }
 
 interface Settings {
@@ -20,7 +31,7 @@ interface Settings {
   friendsArea: string;
 }
 
-// --- ICONS ---
+// --- NAVIGATION BAR ICONS ---
 const HomeIcon: React.FC = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -107,71 +118,55 @@ const SettingsIcon: React.FC = () => (
   </svg>
 );
 
-function App() {
+// --- APP CORE ROOT ---
+export default function App() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [currentTab, setCurrentTab] = useState<TabType>("home");
-
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem("nomad-settings");
     return saved
       ? JSON.parse(saved)
-      : {
-          city: "Hyderabad",
-          flatArea: "Madhapur",
-          friendsArea: "Tolichowki",
-        };
+      : { city: "Hyderabad", flatArea: "Madhapur", friendsArea: "Tolichowki" };
   });
 
-  const [date] = useState<string>(new Date().toISOString().split("T")[0]);
-  const [sleptAt, setSleptAt] = useState<SleepLocation>("Flat/Hotel");
-  const [transportSpend, setTransportSpend] = useState<string>("");
-  const [foodSpend, setFoodSpend] = useState<string>("");
-  const [notes, setNotes] = useState<string>("");
-
   useEffect(() => {
-    const savedLogs = localStorage.getItem("nomad-logs");
+    const savedLogs = localStorage.getItem("nomad-tx-logs");
     if (savedLogs) setLogs(JSON.parse(savedLogs));
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("nomad-logs", JSON.stringify(logs));
+    localStorage.setItem("nomad-tx-logs", JSON.stringify(logs));
   }, [logs]);
 
   useEffect(() => {
     localStorage.setItem("nomad-settings", JSON.stringify(settings));
   }, [settings]);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const newLog: Log = {
-      id: crypto.randomUUID(),
-      date,
-      sleptAt,
-      transportSpend: Number(transportSpend) || 0,
-      foodSpend: Number(foodSpend) || 0,
-      notes,
-    };
-    setLogs([newLog, ...logs]);
-    setTransportSpend("");
-    setFoodSpend("");
-    setNotes("");
+  const addLog = (newLog: Log) => {
+    setLogs((prev) =>
+      [newLog, ...prev].sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+      ),
+    );
     setCurrentTab("home");
   };
 
   const deleteLog = (id: string) =>
     setLogs(logs.filter((log) => log.id !== id));
 
-  const totalTransport = logs.reduce((sum, log) => sum + log.transportSpend, 0);
-  const totalFood = logs.reduce((sum, log) => sum + log.foodSpend, 0);
-  const totalSpent = totalTransport + totalFood;
-
-  const flatNights = logs.filter(
-    (log) => log.sleptAt === "Flat/Hotel" || log.sleptAt === "Hotel",
-  ).length;
-  const friendsNights = logs.filter((log) => log.sleptAt === "Friends").length;
-
-  const dayLabels = ["M", "T", "W", "T", "F", "S", "S"];
-  const daySpends = [400, 700, 300, 890, 500, 1100, 600];
+  const totalSpent = logs.reduce((sum, log) => sum + log.amount, 0);
+  const totalTransport = logs
+    .filter(
+      (l) =>
+        l.type.toLowerCase() === "ride" || l.type.toLowerCase() === "transport",
+    )
+    .reduce((sum, l) => sum + l.amount, 0);
+  const totalFood = logs
+    .filter((l) => l.type.toLowerCase() === "food")
+    .reduce((sum, l) => sum + l.amount, 0);
+  const totalShopping = logs
+    .filter((l) => l.type.toLowerCase() === "shopping")
+    .reduce((sum, l) => sum + l.amount, 0);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 p-4 pb-28 font-sans flex flex-col items-center">
@@ -198,45 +193,27 @@ function App() {
             settings={settings}
           />
         )}
-
         {currentTab === "log" && (
-          <LogScreen
-            handleSubmit={handleSubmit}
-            sleptAt={sleptAt}
-            setSleptAt={setSleptAt}
-            transportSpend={transportSpend}
-            setTransportSpend={setTransportSpend}
-            foodSpend={foodSpend}
-            setFoodSpend={setFoodSpend}
-            notes={notes}
-            setNotes={setNotes}
-            date={date}
-          />
+          <LogScreen addLog={addLog} settings={settings} />
         )}
-
         {currentTab === "stats" && (
-          <StatsScreen
-            totalSpent={totalSpent}
-            flatNights={flatNights}
-            friendsNights={friendsNights}
-            dayLabels={dayLabels}
-            daySpends={daySpends}
-          />
+          <StatsScreen logs={logs} totalSpent={totalSpent} />
         )}
-
         {currentTab === "share" && (
           <ShareScreen
             totalSpent={totalSpent}
             totalTransport={totalTransport}
             totalFood={totalFood}
-            flatNights={flatNights}
-            friendsNights={friendsNights}
+            totalShopping={totalShopping}
             settings={settings}
           />
         )}
-
         {currentTab === "settings" && (
-          <SettingsScreen settings={settings} setSettings={setSettings} />
+          <SettingsScreen
+            settings={settings}
+            setSettings={setSettings}
+            setLogs={setLogs}
+          />
         )}
       </div>
 
@@ -276,21 +253,12 @@ function App() {
   );
 }
 
-// --- SUB-COMPONENTS ---
-
-interface NavItemProps {
+const NavItem: React.FC<{
   icon: React.FC;
   label: string;
   active: boolean;
   onClick: () => void;
-}
-
-const NavItem: React.FC<NavItemProps> = ({
-  icon: Icon,
-  label,
-  active,
-  onClick,
-}) => (
+}> = ({ icon: Icon, label, active, onClick }) => (
   <button
     onClick={onClick}
     className={`flex flex-col items-center gap-1 p-2 relative transition w-16 ${active ? "text-white" : "text-neutral-500 hover:text-neutral-400"}`}
@@ -303,527 +271,921 @@ const NavItem: React.FC<NavItemProps> = ({
   </button>
 );
 
-interface SettingsScreenProps {
-  settings: Settings;
-  setSettings: React.Dispatch<React.SetStateAction<Settings>>;
-}
+// --- SCREEN: HOME DISPLAY ---
+function HomeScreen({ logs, deleteLog, totalSpent, settings }: any) {
+  const formatDay = (dateString: string) => {
+    if (!dateString || dateString === "N/A") return "Date N/A";
+    return new Date(dateString).toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  };
 
-const SettingsScreen: React.FC<SettingsScreenProps> = ({
-  settings,
-  setSettings,
-}) => {
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSettings({ ...settings, [e.target.name]: e.target.value });
+  const getEmoji = (type: string) => {
+    const t = type.toLowerCase();
+    if (t === "ride" || t === "transport") return "🚕";
+    if (t === "food") return "🍛";
+    if (t === "shopping") return "🛍️";
+    return "📝";
   };
 
   return (
-    <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 space-y-5">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-lg font-bold">App Config</h2>
-      </div>
-
-      <div className="space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-neutral-400 mb-1.5">
-            Base City / Region
-          </label>
-          <input
-            type="text"
-            name="city"
-            value={settings.city}
-            onChange={handleChange}
-            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-neutral-400 mb-1.5">
-            Flat/Hotel Neighborhood
-          </label>
-          <input
-            type="text"
-            name="flatArea"
-            value={settings.flatArea}
-            onChange={handleChange}
-            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-neutral-400 mb-1.5">
-            Friend's Neighborhood
-          </label>
-          <input
-            type="text"
-            name="friendsArea"
-            value={settings.friendsArea}
-            onChange={handleChange}
-            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
-          />
-        </div>
-      </div>
-
-      <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400/90 p-4 rounded-xl text-xs leading-relaxed text-center">
-        Changes are saved automatically.
-      </div>
-    </div>
-  );
-};
-
-interface HomeScreenProps {
-  logs: Log[];
-  deleteLog: (id: string) => void;
-  totalSpent: number;
-  settings: Settings;
-}
-
-const HomeScreen: React.FC<HomeScreenProps> = ({
-  logs,
-  deleteLog,
-  totalSpent,
-  settings,
-}) => {
-  const formatDay = (dateString: string) =>
-    new Date(dateString).toLocaleDateString("en-US", { weekday: "short" });
-
-  return (
-    <div className="space-y-6 animation-fade-in">
-      <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 flex justify-between items-center">
+    <div className="space-y-6">
+      <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 flex justify-between items-center shadow-md">
         <div>
           <p className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">
-            This Week
+            Total Logged
           </p>
-          <p className="text-2xl font-black mt-1">
+          <p className="text-2xl font-black mt-1 text-white">
             ₹{totalSpent.toLocaleString("en-IN")}
           </p>
         </div>
-        <div className="bg-neutral-800 text-neutral-300 text-xs px-3 py-1.5 rounded-xl border border-neutral-700">
-          📍 {settings.flatArea}
+        <div className="flex flex-col gap-1 text-right">
+          <span className="bg-neutral-800 text-neutral-300 text-[11px] px-2.5 py-1 rounded-xl border border-neutral-700">
+            🏠 Flat: {settings.flatArea}
+          </span>
+          <span className="bg-neutral-800/60 text-neutral-400 text-[11px] px-2.5 py-1 rounded-xl border border-neutral-800">
+            👥 Friends: {settings.friendsArea}
+          </span>
         </div>
       </div>
 
       <div>
         <h2 className="text-lg font-bold text-neutral-400 mb-3 px-1">
-          Recent logs
+          Recent Transactions ({logs.length})
         </h2>
         {logs.length === 0 ? (
           <div className="text-center py-16 text-neutral-600 bg-neutral-900 rounded-2xl border-2 border-dashed border-neutral-800">
-            No logs yet. Tap "Log" to begin!
+            No entries loaded yet. Import your data JSON inside the Config menu!
           </div>
         ) : (
           <div className="space-y-3">
-            {logs.map((log) => {
-              const isBase =
-                log.sleptAt === "Flat/Hotel" || log.sleptAt === "Hotel";
-              return (
-                <div
-                  key={log.id}
-                  className="bg-neutral-900 rounded-2xl p-4 border border-neutral-800 flex items-center justify-between group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${isBase ? "bg-indigo-950/60 text-indigo-400" : "bg-emerald-950/60 text-emerald-400"}`}
-                    >
-                      {isBase ? "🏢" : "🏠"}
-                    </div>
-                    <div>
-                      <p className="font-bold text-base">
-                        {formatDay(log.date)}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        {isBase ? "Flat/Hotel" : "Friends"} ·{" "}
-                        {log.notes
-                          ? `"${log.notes.slice(0, 18)}..."`
-                          : "No notes"}
-                      </p>
-                    </div>
+            {logs.slice(0, 50).map((log: Log) => (
+              <div
+                key={log.id}
+                className="bg-neutral-900 rounded-2xl p-4 border border-neutral-800 flex items-center justify-between group hover:border-neutral-700 transition"
+              >
+                <div className="flex items-center gap-3 w-3/4">
+                  <div className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg bg-neutral-800 border border-neutral-700 shadow-inner">
+                    {getEmoji(log.type)}
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-base text-neutral-100">
-                      ₹
-                      {(log.transportSpend + log.foodSpend).toLocaleString(
-                        "en-IN",
-                      )}
+                  <div className="overflow-hidden">
+                    <p className="font-bold text-sm text-neutral-200 truncate">
+                      {log.details || log.type}
                     </p>
-                    <button
-                      onClick={() => deleteLog(log.id)}
-                      className="text-[11px] text-red-500/70 hover:text-red-400 transition mt-0.5 opacity-0 group-hover:opacity-100"
-                    >
-                      Delete
-                    </button>
+                    <p className="text-[11px] text-neutral-500 truncate">
+                      {formatDay(log.date)} {log.time && `• ${log.time}`} •{" "}
+                      <span className="text-blue-400 font-medium">
+                        {log.platform}
+                      </span>
+                    </p>
                   </div>
                 </div>
-              );
-            })}
+                <div className="text-right shrink-0">
+                  <p className="font-bold text-base text-neutral-100">
+                    ₹{log.amount.toLocaleString("en-IN")}
+                  </p>
+                  <button
+                    onClick={() => deleteLog(log.id)}
+                    className="text-[11px] text-red-500/70 hover:text-red-400 transition mt-0.5 opacity-0 group-hover:opacity-100"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
     </div>
   );
-};
-
-interface LogScreenProps {
-  handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
-  sleptAt: SleepLocation;
-  setSleptAt: React.Dispatch<React.SetStateAction<SleepLocation>>;
-  transportSpend: string;
-  setTransportSpend: React.Dispatch<React.SetStateAction<string>>;
-  foodSpend: string;
-  setFoodSpend: React.Dispatch<React.SetStateAction<string>>;
-  notes: string;
-  setNotes: React.Dispatch<React.SetStateAction<string>>;
-  date: string;
 }
 
-const LogScreen: React.FC<LogScreenProps> = ({
-  handleSubmit,
-  sleptAt,
-  setSleptAt,
-  transportSpend,
-  setTransportSpend,
-  foodSpend,
-  setFoodSpend,
-  notes,
-  setNotes,
-  date,
-}) => {
-  return (
-    <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 space-y-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Log today</h2>
-        <span className="text-xs text-neutral-400 bg-neutral-800 px-2.5 py-1 rounded-md border border-neutral-700">
-          {new Date(date).toLocaleDateString("en-US", {
-            weekday: "short",
-            day: "numeric",
-            month: "short",
-          })}
-        </span>
-      </div>
+// --- SCREEN: TRANSACTION LOG INPUT ---
+function LogScreen({
+  addLog,
+  settings,
+}: {
+  addLog: (log: Log) => void;
+  settings: Settings;
+}) {
+  const [date, setDate] = useState<string>(
+    new Date().toISOString().split("T")[0],
+  );
+  const [time, setTime] = useState<string>(
+    new Date().toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }),
+  );
+  const [type, setType] = useState<string>("Ride");
+  const [amount, setAmount] = useState<string>("");
+  const [details, setDetails] = useState<string>("");
+  const [platform, setPlatform] = useState<string>("Uber");
+  const [mode, setMode] = useState<string>("Bike");
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+  const suggestions = {
+    Ride: {
+      platforms: ["Uber", "Rapido", "Manual", "Metro"],
+      modes: ["Bike", "Auto", "Cab"],
+    },
+    Food: {
+      platforms: ["Swiggy", "Zomato", "In-Store"],
+      modes: ["Delivery", "Dine-in"],
+    },
+    Shopping: {
+      platforms: ["Blinkit", "Zepto", "Amazon", "In-Store"],
+      modes: ["Delivery", "Pickup"],
+    },
+  };
+
+  useEffect(() => {
+    const currentCategory = suggestions[type as keyof typeof suggestions];
+    if (currentCategory) {
+      setPlatform(currentCategory.platforms[0]);
+      setMode(currentCategory.modes[0]);
+    }
+  }, [type]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    addLog({
+      id: crypto.randomUUID(),
+      date,
+      time,
+      type,
+      amount: Number(amount) || 0,
+      details,
+      platform,
+      mode,
+    });
+    setAmount("");
+    setDetails("");
+  };
+
+  return (
+    <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 space-y-5 shadow-xl">
+      <h2 className="text-lg font-bold text-neutral-200">Log Transaction</h2>
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-semibold text-neutral-400 mb-2">
-            Where did you sleep?
+            Category
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setSleptAt("Flat/Hotel")}
-              className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-bold transition ${sleptAt === "Flat/Hotel" || sleptAt === "Hotel" ? "bg-white text-neutral-900 border-white" : "bg-neutral-800 text-neutral-400 border-neutral-700 hover:border-neutral-600"}`}
-            >
-              🏢 Flat/Hotel
-            </button>
-            <button
-              type="button"
-              onClick={() => setSleptAt("Friends")}
-              className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-bold transition ${sleptAt === "Friends" ? "bg-white text-neutral-900 border-white" : "bg-neutral-800 text-neutral-400 border-neutral-700 hover:border-neutral-600"}`}
-            >
-              🏠 Friends
-            </button>
+          <div className="grid grid-cols-3 gap-2">
+            {["Ride", "Food", "Shopping"].map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setType(t)}
+                className={`p-2.5 rounded-xl border text-xs font-bold transition ${type === t ? "bg-white text-neutral-900 border-white shadow-lg" : "bg-neutral-800 text-neutral-400 border-neutral-700 hover:bg-neutral-750"}`}
+              >
+                {t === "Ride"
+                  ? "🚕 Ride"
+                  : t === "Food"
+                    ? "🍛 Food"
+                    : "🛍️ Shop"}
+              </button>
+            ))}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-semibold text-neutral-400 mb-1.5">
-              Transport spent (₹)
+              Amount (₹)
             </label>
             <input
               type="number"
-              placeholder="350"
-              value={transportSpend}
-              onChange={(e) => setTransportSpend(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-500"
+              required
+              placeholder="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
             />
           </div>
           <div>
             <label className="block text-xs font-semibold text-neutral-400 mb-1.5">
-              Food spent (₹)
+              Date & Time
             </label>
-            <input
-              type="number"
-              placeholder="280"
-              value={foodSpend}
-              onChange={(e) => setFoodSpend(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-500"
-            />
+            <div className="flex gap-1.5">
+              <input
+                type="date"
+                required
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-2 text-xs focus:outline-none text-neutral-200"
+              />
+              <input
+                type="text"
+                placeholder="09:25 AM"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-2 text-xs focus:outline-none text-neutral-200"
+              />
+            </div>
           </div>
         </div>
 
         <div>
           <label className="block text-xs font-semibold text-neutral-400 mb-1.5">
-            Any issues today?
+            Platform Fast Selector
           </label>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {suggestions[type as keyof typeof suggestions]?.platforms.map(
+              (p) => (
+                <span
+                  key={p}
+                  onClick={() => setPlatform(p)}
+                  className={`px-3 py-1 text-[11px] font-medium rounded-full cursor-pointer transition ${platform === p ? "bg-blue-500/20 text-blue-300 border border-blue-500/50 shadow" : "bg-neutral-800 text-neutral-400 border border-neutral-700 hover:text-neutral-300"}`}
+                >
+                  {p}
+                </span>
+              ),
+            )}
+          </div>
+          <input
+            type="text"
+            placeholder="Or specify custom platform..."
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-2.5 text-sm focus:outline-none"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-neutral-400 mb-1">
+            Destination Location Suggestions
+          </label>
+          <div className="flex gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setDetails(settings.flatArea)}
+              className="bg-neutral-800 border border-neutral-700 text-neutral-400 text-[10px] py-1 px-2.5 rounded-lg hover:text-white"
+            >
+              📍 Flat ({settings.flatArea})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetails(settings.friendsArea)}
+              className="bg-neutral-800 border border-neutral-700 text-neutral-400 text-[10px] py-1 px-2.5 rounded-lg hover:text-white"
+            >
+              📍 Friend ({settings.friendsArea})
+            </button>
+          </div>
           <textarea
-            placeholder="Water, heat, surge..."
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-500 min-h-[90px]"
+            required
+            placeholder="Specify landmark or order descriptors..."
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm focus:outline-none min-h-[60px]"
           />
         </div>
 
         <button
           type="submit"
-          className="w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-900 font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-1.5 text-sm"
+          className="w-full bg-neutral-100 hover:bg-neutral-200 text-neutral-900 font-extrabold py-3.5 rounded-xl transition shadow-md"
         >
-          Save day
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2.5}
-            stroke="currentColor"
-            className="w-4 h-4"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"
-            />
-          </svg>
+          Save Transaction
         </button>
       </form>
     </div>
   );
-};
-
-interface StatsScreenProps {
-  totalSpent: number;
-  flatNights: number;
-  friendsNights: number;
-  dayLabels: string[];
-  daySpends: number[];
 }
 
-const StatsScreen: React.FC<StatsScreenProps> = ({
-  totalSpent,
-  flatNights,
-  friendsNights,
-  dayLabels,
-  daySpends,
-}) => {
-  const maxSpend = Math.max(...daySpends);
+// --- SCREEN: STATS DISPLAY (INCLUDES THREE INDEPENDENT SEGMENT CHARTS) ---
+function StatsScreen({ logs }: { logs: Log[]; totalSpent: number }) {
+  const getGroupedPlatform = (
+    log: Log,
+    category: "Ride" | "Food" | "Shopping",
+  ) => {
+    const platform = (log.platform || "").toLowerCase().trim();
+    const mode = (log.mode || "").toLowerCase().trim();
+
+    if (category === "Ride") {
+      if (platform.includes("uber") || mode.includes("uber")) return "Uber";
+      if (platform.includes("rapido") || mode.includes("rapido"))
+        return "Rapido";
+      return "Other";
+    }
+    if (category === "Food") {
+      if (platform.includes("zomato")) return "Zomato";
+      if (platform.includes("swiggy")) return "Swiggy";
+      return "Other";
+    }
+    if (category === "Shopping") {
+      if (platform.includes("blinkit")) return "Blinkit";
+      if (platform.includes("zepto")) return "Zepto";
+      if (platform.includes("amazon")) return "Amazon";
+      return "Other";
+    }
+    return "Other";
+  };
+
+  const rideLogs = logs.filter(
+    (l) =>
+      l.type.toLowerCase() === "ride" || l.type.toLowerCase() === "transport",
+  );
+  const foodLogs = logs.filter((l) => l.type.toLowerCase() === "food");
+  const shoppingLogs = logs.filter((l) => l.type.toLowerCase() === "shopping");
+
+  const buildChartTimelineData = (
+    categoryLogs: Log[],
+    type: "Ride" | "Food" | "Shopping",
+    keys: string[],
+  ) => {
+    const datesMap = categoryLogs.reduce(
+      (acc, log) => {
+        const d = log.date;
+        if (!d || d === "N/A") return acc;
+        if (!acc[d]) {
+          acc[d] = {
+            date: d,
+            displayDate: new Date(d).toLocaleDateString("en-US", {
+              day: "numeric",
+              month: "short",
+            }),
+          };
+          keys.forEach((k) => (acc[d][k] = 0));
+        }
+        const platformGroup = getGroupedPlatform(log, type);
+        if (keys.includes(platformGroup)) {
+          acc[d][platformGroup] += log.amount;
+        } else {
+          acc[d]["Other"] += log.amount;
+        }
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
+
+    return Object.keys(datesMap)
+      .sort()
+      .map((k) => datesMap[k]);
+  };
+
+  const transportData = buildChartTimelineData(rideLogs, "Ride", [
+    "Uber",
+    "Rapido",
+    "Other",
+  ]);
+  const foodData = buildChartTimelineData(foodLogs, "Food", [
+    "Zomato",
+    "Swiggy",
+    "Other",
+  ]);
+  const shoppingData = buildChartTimelineData(shoppingLogs, "Shopping", [
+    "Blinkit",
+    "Zepto",
+    "Amazon",
+    "Other",
+  ]);
+
+  const calculateTopProvider = (
+    categoryLogs: Log[],
+    type: "Ride" | "Food" | "Shopping",
+    platforms: string[],
+  ) => {
+    if (categoryLogs.length === 0)
+      return { name: "No Data", count: 0, total: 0 };
+    const matrix = platforms.reduce(
+      (acc, p) => {
+        acc[p] = { count: 0, total: 0 };
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
+
+    categoryLogs.forEach((log) => {
+      let group = getGroupedPlatform(log, type);
+      if (!matrix[group]) group = "Other";
+      matrix[group].count += 1;
+      matrix[group].total += log.amount;
+    });
+
+    return Object.entries(matrix).reduce(
+      (best: any, [name, val]: any) => {
+        return val.count > best.count ? { name, ...val } : best;
+      },
+      { name: "Other", count: 0, total: 0 },
+    );
+  };
+
+  const bestTransport = calculateTopProvider(rideLogs, "Ride", [
+    "Uber",
+    "Rapido",
+    "Other",
+  ]);
+  const bestFood = calculateTopProvider(foodLogs, "Food", [
+    "Zomato",
+    "Swiggy",
+    "Other",
+  ]);
+  const bestDeliveryApps = calculateTopProvider(shoppingLogs, "Shopping", [
+    "Blinkit",
+    "Zepto",
+    "Amazon",
+    "Other",
+  ]);
+
+  // FIX: Multi-format parsing mechanics to capture peak hour metrics precisely
+  const officeHourLogs = rideLogs.filter((l) => {
+    if (!l.time || l.time === "N/A") return false;
+    const match = l.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+    if (!match) return false;
+
+    let hour = parseInt(match[1], 10);
+    const meridiem = match[3];
+    if (meridiem) {
+      if (meridiem.toUpperCase() === "PM" && hour < 12) hour += 12;
+      if (meridiem.toUpperCase() === "AM" && hour === 12) hour = 0;
+    }
+    return (hour >= 8 && hour <= 11) || (hour >= 17 && hour <= 20);
+  });
+
+  const getPeakRate = (provider: string) => {
+    const peakCommutes = officeHourLogs.filter(
+      (l) => getGroupedPlatform(l, "Ride") === provider,
+    );
+    if (peakCommutes.length === 0) return null;
+    return Math.round(
+      peakCommutes.reduce((sum, l) => sum + l.amount, 0) / peakCommutes.length,
+    );
+  };
+
+  const uberPeakAvg = getPeakRate("Uber");
+  const rapidoPeakAvg = getPeakRate("Rapido");
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-neutral-800 border border-neutral-700 p-3 rounded-lg shadow-xl text-xs">
+          <p className="font-bold text-neutral-300 mb-1.5">{label}</p>
+          {payload.map((entry: any) => (
+            <div key={entry.name} className="flex items-center gap-2 mb-0.5">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: entry.color }}
+              ></div>
+              <span className="text-neutral-400">{entry.name}:</span>
+              <span className="font-bold text-white">₹{entry.value}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* GRAPH SECTION 1: TRANSPORTATION */}
+      <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm">
+        <h3 className="text-xs font-bold text-neutral-400 tracking-wider uppercase mb-2 px-1">
+          🚕 Transport Comparison
+        </h3>
+        <div className="h-44 w-full -ml-4 text-[10px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={transportData}>
+              <XAxis dataKey="displayDate" stroke="#52525b" tickLine={false} />
+              <YAxis
+                stroke="#52525b"
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `₹${v}`}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} />
+              <Line
+                type="monotone"
+                dataKey="Uber"
+                stroke="#ef4444"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Rapido"
+                stroke="#3b82f6"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Other"
+                stroke="#a855f7"
+                strokeWidth={1.5}
+                dot={{ r: 1 }}
+                connectNulls
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* GRAPH SECTION 2: FOOD DELIVERY */}
+      <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm">
+        <h3 className="text-xs font-bold text-neutral-400 tracking-wider uppercase mb-2 px-1">
+          🍛 Food App Comparison
+        </h3>
+        <div className="h-44 w-full -ml-4 text-[10px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={foodData}>
+              <XAxis dataKey="displayDate" stroke="#52525b" tickLine={false} />
+              <YAxis
+                stroke="#52525b"
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `₹${v}`}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} />
+              <Line
+                type="monotone"
+                dataKey="Zomato"
+                stroke="#e11d48"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Swiggy"
+                stroke="#f97316"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Other"
+                stroke="#71717a"
+                strokeWidth={1.5}
+                dot={{ r: 1 }}
+                connectNulls
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* GRAPH SECTION 3: QUICK COMMERCE / RETAIL */}
+      <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 shadow-sm">
+        <h3 className="text-xs font-bold text-neutral-400 tracking-wider uppercase mb-2 px-1">
+          🛍️ Quick Commerce & Store Delivery
+        </h3>
+        <div className="h-44 w-full -ml-4 text-[10px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={shoppingData}>
+              <XAxis dataKey="displayDate" stroke="#52525b" tickLine={false} />
+              <YAxis
+                stroke="#52525b"
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v) => `₹${v}`}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }} />
+              <Line
+                type="monotone"
+                dataKey="Blinkit"
+                stroke="#eab308"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Zepto"
+                stroke="#ec4899"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Amazon"
+                stroke="#06b6d4"
+                strokeWidth={2.5}
+                dot={{ r: 2 }}
+                connectNulls
+              />
+              <Line
+                type="monotone"
+                dataKey="Other"
+                stroke="#78716c"
+                strokeWidth={1.5}
+                dot={{ r: 1 }}
+                connectNulls
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* PERIODIC ANALYSIS SUMMARIES */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-bold text-neutral-400 px-1 uppercase tracking-wider">
+          Metrics Insights
+        </h3>
+
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 flex justify-between items-center shadow-md">
+          <div>
+            <p className="text-[10px] text-neutral-500 font-bold uppercase">
+              Best Transport Service (By Frequency)
+            </p>
+            <p className="text-base font-black text-white mt-0.5">
+              {bestTransport.name === "Other"
+                ? "Manual/Auto"
+                : bestTransport.name}
+            </p>
+            <p className="text-xs text-neutral-400">
+              {bestTransport.count} rides completed this period
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] text-neutral-400 font-medium">
+              Spent Volume
+            </p>
+            <p className="text-sm font-bold text-blue-400">
+              ₹{bestTransport.total.toLocaleString("en-IN")}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 flex justify-between items-center shadow-md">
+          <div>
+            <p className="text-[10px] text-neutral-500 font-bold uppercase">
+              Best Food Delivery Platform
+            </p>
+            <p className="text-base font-black text-white mt-0.5">
+              {bestFood.name}
+            </p>
+            <p className="text-xs text-neutral-400">
+              {bestFood.count} fulfillment deliveries made
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] text-neutral-400 font-medium">
+              Spent Volume
+            </p>
+            <p className="text-sm font-bold text-orange-400">
+              ₹{bestFood.total.toLocaleString("en-IN")}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 flex justify-between items-center shadow-md">
+          <div>
+            <p className="text-[10px] text-neutral-500 font-bold uppercase">
+              Best Delivery Apps (Shopping)
+            </p>
+            <p className="text-base font-black text-white mt-0.5">
+              {bestDeliveryApps.name}
+            </p>
+            <p className="text-xs text-neutral-400">
+              {bestDeliveryApps.count} item fulfillments logged
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] text-neutral-400 font-medium">
+              Spent Volume
+            </p>
+            <p className="text-sm font-bold text-emerald-400">
+              ₹{bestDeliveryApps.total.toLocaleString("en-IN")}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* SURGE INTEL HIGHLIGHT AREA */}
+      <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800 space-y-2 shadow-inner">
+        <h3 className="text-xs font-bold text-neutral-200 uppercase tracking-wide flex items-center gap-1.5">
+          ⚡ Surge Traffic Performance
+        </h3>
+        <div className="grid grid-cols-2 gap-2 text-center">
+          <div className="bg-neutral-800/40 p-2.5 rounded-xl">
+            <p className="text-[9px] text-neutral-400 font-bold uppercase">
+              Uber Rush Hour Avg
+            </p>
+            <p className="text-base font-black text-red-400">
+              {uberPeakAvg ? `₹${uberPeakAvg}` : "N/A"}
+            </p>
+          </div>
+          <div className="bg-neutral-800/40 p-2.5 rounded-xl">
+            <p className="text-[9px] text-neutral-400 font-bold uppercase">
+              Rapido Rush Hour Avg
+            </p>
+            <p className="text-base font-black text-blue-400">
+              {rapidoPeakAvg ? `₹${rapidoPeakAvg}` : "N/A"}
+            </p>
+          </div>
+        </div>
+        <p className="text-[10px] text-center text-neutral-500 pt-0.5">
+          Calculated across {officeHourLogs.length} verified rush-hour data
+          cycles.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// --- SCREEN: APPLICATION CONFIG (LOADS JSON DATA & CONFIGS HOMESTEAD SELECTIONS) ---
+function SettingsScreen({ settings, setSettings, setLogs }: any) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSettings({ ...settings, [e.target.name]: e.target.value });
+  };
+
+  const handleJsonDataSync = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const fileContent = evt.target?.result as string;
+        const parsedArray = JSON.parse(fileContent);
+
+        if (Array.isArray(parsedArray)) {
+          const processedLogs: Log[] = parsedArray.map(
+            (node: any, idx: number) => ({
+              id: node.id || String(idx + 1),
+              type: node.type || "Other",
+              amount: Number(node.amount) || 0,
+              details: node.details || "",
+              date: node.date || "N/A",
+              time: node.time || "N/A",
+              platform: node.platform || "Other",
+              mode: node.mode || "N/A",
+            }),
+          );
+
+          setLogs(processedLogs);
+          alert(
+            `Successfully loaded and synchronized ${processedLogs.length} entries from JSON data!`,
+          );
+        } else {
+          alert(
+            "Error: Top-level JSON configuration structure must be an Array.",
+          );
+        }
+      } catch (err) {
+        alert("Failed to parse the target JSON. Double check syntax validity.");
+      }
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.readAsText(file);
+  };
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between px-1">
-        <h2 className="text-xl font-bold">This week</h2>
-        <span className="text-xs text-neutral-400">May 13–20</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800">
-          <p className="text-xs text-neutral-400 font-medium">Total spent</p>
-          <p className="text-2xl font-black mt-1">
-            ₹{totalSpent.toLocaleString("en-IN")}
-          </p>
-          <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-0.5">
-            ↑ vs last week
-          </p>
-        </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800">
-          <p className="text-xs text-neutral-400 font-medium">Trips taken</p>
-          <p className="text-2xl font-black mt-1">
-            {flatNights + friendsNights}
-          </p>
-          <p className="text-[11px] text-neutral-500 mt-1">Rapido · Uber</p>
-        </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800">
-          <p className="text-xs text-neutral-400 font-medium">
-            Flat/Hotel nights
-          </p>
-          <p className="text-2xl font-black mt-1">{flatNights}</p>
-          <p className="text-[11px] text-neutral-500 mt-1">base mode</p>
-        </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-neutral-800">
-          <p className="text-xs text-neutral-400 font-medium">Friends nights</p>
-          <p className="text-2xl font-black mt-1">{friendsNights}</p>
-          <p className="text-[11px] text-neutral-500 mt-1">dinners there</p>
+      {/* DATA CONTROLS SECTION */}
+      <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 space-y-4 shadow-md">
+        <h2 className="text-base font-bold text-neutral-200 uppercase tracking-wide">
+          Data Storage Management
+        </h2>
+        <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-blue-100">
+              Synchronize Application JSON
+            </p>
+            <p className="text-[11px] text-blue-200/60 leading-relaxed mt-1">
+              Select and import the exported 42-item array file to directly
+              populate the data fields.
+            </p>
+          </div>
+          <input
+            type="file"
+            accept=".json"
+            ref={fileInputRef}
+            onChange={handleJsonDataSync}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-sm transition"
+          >
+            Load Native Data File (.json)
+          </button>
         </div>
       </div>
 
-      <div className="bg-neutral-900 p-5 rounded-2xl border border-neutral-800 space-y-4">
-        <p className="text-xs text-neutral-400 font-semibold uppercase tracking-wider">
-          Daily spend
-        </p>
-
-        <div className="flex justify-between items-end h-28 pt-4 px-2">
-          {daySpends.map((spend, index) => {
-            const barHeight = maxSpend ? `${(spend / maxSpend) * 100}%` : "10%";
-            return (
-              <div
-                key={index}
-                className="flex flex-col items-center gap-2 h-full justify-end w-8"
-              >
-                <div
-                  className={`w-full rounded-t-md transition-all duration-500 ${index === 3 || index === 5 ? "bg-blue-500" : "bg-neutral-800"}`}
-                  style={{ height: barHeight }}
-                ></div>
-                <span className="text-xs text-neutral-500 font-bold">
-                  {dayLabels[index]}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="bg-amber-50/5 text-amber-200/90 p-4 rounded-xl border border-amber-500/10 text-xs leading-relaxed">
-          ⚡ <strong className="text-amber-100">Pattern found:</strong> Thursday
-          and Saturday are your most expensive days. Avg ₹550 vs ₹280 weekdays.
+      {/* DESTINATION SELECTION CONFIGURATION */}
+      <div className="bg-neutral-900 rounded-2xl p-5 border border-neutral-800 space-y-4 shadow-md">
+        <h2 className="text-base font-bold text-neutral-200 uppercase tracking-wide">
+          Nomad Location Anchors
+        </h2>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-neutral-400 mb-1">
+              Current Base City
+            </label>
+            <input
+              type="text"
+              name="city"
+              value={settings.city}
+              onChange={handleTextChange}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-400 mb-1">
+              Flat / Residential Quarter Area
+            </label>
+            <input
+              type="text"
+              name="flatArea"
+              value={settings.flatArea}
+              onChange={handleTextChange}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-neutral-400 mb-1">
+              Friends House / Recurrent Social Hub Area
+            </label>
+            <input
+              type="text"
+              name="friendsArea"
+              value={settings.friendsArea}
+              onChange={handleTextChange}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl p-3 text-sm text-neutral-100 focus:outline-none focus:border-neutral-500"
+            />
+          </div>
         </div>
       </div>
     </div>
   );
-};
-
-interface ShareScreenProps {
-  totalSpent: number;
-  totalTransport: number;
-  totalFood: number;
-  flatNights: number;
-  friendsNights: number;
-  settings: Settings;
 }
 
-const ShareScreen: React.FC<ShareScreenProps> = ({
+// --- SCREEN: SNAPSHOT SHARING INTERFACE ---
+function ShareScreen({
   totalSpent,
   totalTransport,
   totalFood,
-  flatNights,
-  friendsNights,
+  totalShopping,
   settings,
-}) => {
+}: any) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [isDownloading, setIsDownloading] = useState<boolean>(false);
-
   const handleDownload = async () => {
     if (!cardRef.current) return;
-    setIsDownloading(true);
-
-    try {
-      const dataUrl = await toPng(cardRef.current, {
-        cacheBust: true,
-        pixelRatio: 3,
-      });
-      const link = document.createElement("a");
-      link.download = "nomad-tracker-week.png";
-      link.href = dataUrl;
-      link.click();
-    } catch (err) {
-      console.error("Failed to export image", err);
-    } finally {
-      setIsDownloading(false);
-    }
+    const dataUrl = await toPng(cardRef.current, {
+      cacheBust: true,
+      pixelRatio: 3,
+    });
+    const link = document.createElement("a");
+    link.download = "nomad-tracker-stats.png";
+    link.href = dataUrl;
+    link.click();
   };
-
-  const handleWhatsApp = () => {
-    const text = `Hey! Check out my week living nomadically in ${settings.city}: \n\n💸 Total Spent: ₹${totalSpent}\n🚕 Transport: ₹${totalTransport}\n🍛 Food: ₹${totalFood}\n🏢 Flat/Hotel: ${flatNights} nights\n🏠 Friends: ${friendsNights} nights\n\nBuilt with Nomad Tracker 📍`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-  };
-
   return (
-    <div className="space-y-6 pt-4">
-      <div className="flex items-center justify-between px-1">
-        <h2 className="text-2xl font-bold">Share</h2>
-        <span className="text-xs text-neutral-400 bg-neutral-800 px-2.5 py-1 rounded-md border border-neutral-700">
-          Week 3
-        </span>
-      </div>
-
-      <p className="text-sm font-medium text-neutral-400 px-1">
-        Your share card
-      </p>
-
+    <div className="space-y-4 pt-2">
       <div
         ref={cardRef}
         className="bg-[#111827] rounded-3xl p-6 border border-neutral-800 shadow-2xl relative overflow-hidden"
       >
         <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl"></div>
         <div className="absolute bottom-0 left-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl"></div>
-
         <div className="relative z-10">
           <p className="text-xs text-blue-200/60 font-bold tracking-widest uppercase mb-1">
-            {(settings.flatArea || "").toUpperCase()} ↔{" "}
-            {(settings.friendsArea || "").toUpperCase()} · WEEK 3
+            {settings.city.toUpperCase()} · INSIGHT REPORT
           </p>
-          <h3 className="text-4xl font-black text-white mb-6">
-            ₹{totalSpent.toLocaleString("en-IN")}{" "}
-            <span className="text-lg text-neutral-400 font-medium">spent</span>
+          <h3 className="text-3xl font-black text-white mb-4">
+            ₹{totalSpent.toLocaleString("en-IN")}
           </h3>
-
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="bg-neutral-800/80 backdrop-blur-sm p-4 rounded-2xl border border-neutral-700/50">
-              <p className="text-xs text-neutral-400 font-medium mb-1">
-                Transport
-              </p>
-              <p className="text-xl font-bold text-white">
+          <div className="space-y-2 text-xs text-neutral-300">
+            <div className="flex justify-between border-b border-neutral-800 pb-1.5">
+              <span>🚕 Transport Total:</span>
+              <span className="font-bold text-white">
                 ₹{totalTransport.toLocaleString("en-IN")}
-              </p>
+              </span>
             </div>
-            <div className="bg-neutral-800/80 backdrop-blur-sm p-4 rounded-2xl border border-neutral-700/50">
-              <p className="text-xs text-neutral-400 font-medium mb-1">Food</p>
-              <p className="text-xl font-bold text-white">
+            <div className="flex justify-between border-b border-neutral-800 pb-1.5">
+              <span>🍛 Culinary / Food Total:</span>
+              <span className="font-bold text-white">
                 ₹{totalFood.toLocaleString("en-IN")}
-              </p>
+              </span>
             </div>
-            <div className="bg-neutral-800/80 backdrop-blur-sm p-4 rounded-2xl border border-neutral-700/50">
-              <p className="text-xs text-neutral-400 font-medium mb-1">
-                Flat/Hotel
-              </p>
-              <p className="text-xl font-bold text-white">{flatNights} 🏢</p>
+            <div className="flex justify-between pt-0.5">
+              <span>🛍️ Delivery & Shopping Total:</span>
+              <span className="font-bold text-white">
+                ₹{totalShopping.toLocaleString("en-IN")}
+              </span>
             </div>
-            <div className="bg-neutral-800/80 backdrop-blur-sm p-4 rounded-2xl border border-neutral-700/50">
-              <p className="text-xs text-neutral-400 font-medium mb-1">
-                Friends nights
-              </p>
-              <p className="text-xl font-bold text-white">{friendsNights} 🏠</p>
-            </div>
-          </div>
-
-          <div className="flex justify-between items-end border-t border-neutral-800/80 pt-4">
-            <p className="text-[10px] text-neutral-500 leading-tight">
-              {flatNights + friendsNights} trips · Rapido + Uber
-            </p>
-            <p className="text-[10px] text-neutral-500 font-medium">
-              built with nomad tracker
-            </p>
           </div>
         </div>
       </div>
-
-      <div className="space-y-3">
-        <button
-          onClick={handleDownload}
-          disabled={isDownloading}
-          className="w-full bg-[#1e293b] hover:bg-[#334155] text-white font-bold py-4 rounded-2xl transition flex items-center justify-center gap-2 border border-slate-700"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-            className="w-5 h-5"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
-            />
-          </svg>
-          {isDownloading ? "Generating Image..." : "Download card"}
-        </button>
-
-        <button
-          onClick={handleWhatsApp}
-          className="w-full bg-[#1e293b] hover:bg-[#334155] text-white font-bold py-4 rounded-2xl transition flex items-center justify-center gap-2 border border-slate-700"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51a12.8 12.8 0 0 0-.57-.01c-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z" />
-          </svg>
-          Share to WhatsApp
-        </button>
-      </div>
+      <button
+        onClick={handleDownload}
+        className="w-full bg-[#1e293b] hover:bg-[#334155] text-white font-extrabold py-3.5 rounded-2xl transition border border-slate-700 text-sm shadow-md"
+      >
+        Download Snapshot Image
+      </button>
     </div>
   );
-};
-
-export default App;
+}
