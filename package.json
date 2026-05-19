@@ -39,6 +39,7 @@
     "html-to-image": "^1.11.13",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-is": "^19.2.6",
     "recharts": "^3.8.1"
   },
   "devDependencies": {
