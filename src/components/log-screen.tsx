@@ -1,5 +1,5 @@
 import { Log, Settings } from "app/app";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // --- SCREEN: TRANSACTION LOG INPUT ---
 export const LogScreen = ({
