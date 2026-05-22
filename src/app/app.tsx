@@ -7,6 +7,15 @@ import { FlightsScreen } from "components/flights-screen";
 import { LogScreen } from "components/log-screen";
 import { HomeScreen } from "components/home-screen";
 
+// Import IndexedDB methods directly from your decoupled database manager
+import {
+  getAllLogs,
+  saveLog,
+  deleteLogFromDB,
+  getSettingsFromDB,
+  saveSettingsToDB,
+} from "../db";
+
 // --- TYPES & INTERFACES ---
 type TabType = "home" | "log" | "flights" | "stats" | "share" | "settings";
 type ExpenseType = "Ride" | "Food" | "Shopping" | "Flight" | string;
@@ -19,10 +28,10 @@ export interface Log {
   title: string;
   amount: number;
   details: string;
-  platform: string; // Maps to Airline for flights
-  mode: string; // Maps to Flight Number or Class
-  from?: string; // Flight specific origin
-  to?: string; // Flight specific destination
+  platform: string;
+  mode: string;
+  from?: string;
+  to?: string;
 }
 
 export interface Settings {
@@ -138,38 +147,69 @@ const SettingsIcon: React.FC = () => (
 export default function App() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [currentTab, setCurrentTab] = useState<TabType>("home");
-  const [settings, setSettings] = useState<Settings>(() => {
-    const saved = localStorage.getItem("nomad-settings");
-    return saved
-      ? JSON.parse(saved)
-      : { city: "Hyderabad", flatArea: "Madhapur", friendsArea: "Tolichowki" };
+  const [settings, setSettingsState] = useState<Settings>({
+    city: "Hyderabad",
+    flatArea: "Madhapur",
+    friendsArea: "Tolichowki",
   });
 
+  // 1. DUAL INITIALIZATION FROM INDEXEDDB ON MOUNT
   useEffect(() => {
-    const savedLogs = localStorage.getItem("nomad-tx-logs");
-    if (savedLogs) setLogs(JSON.parse(savedLogs));
+    async function loadPersistentStore() {
+      try {
+        const dbLogs = await getAllLogs();
+        setLogs(dbLogs);
+
+        const dbSettings = await getSettingsFromDB();
+        if (dbSettings) {
+          setSettingsState(dbSettings);
+        }
+      } catch (err) {
+        console.error("Failed to connect to local database engine:", err);
+      }
+    }
+    loadPersistentStore();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("nomad-tx-logs", JSON.stringify(logs));
-  }, [logs]);
-
-  useEffect(() => {
-    localStorage.setItem("nomad-settings", JSON.stringify(settings));
-  }, [settings]);
-
-  const addLog = (newLog: Log) => {
-    setLogs((prev) =>
-      [newLog, ...prev].sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-      ),
-    );
-    setCurrentTab("home");
+  // 2. ASYNC LOG WRITER MUTATION
+  const addLog = async (newLog: Log) => {
+    try {
+      await saveLog(newLog); // Atomic save right to database object store
+      setLogs((prev) =>
+        [newLog, ...prev].sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+        ),
+      );
+      setCurrentTab("home");
+    } catch (err) {
+      console.error("Database save failed:", err);
+      alert("Error: Transaction could not be written to database store.");
+    }
   };
 
-  const deleteLog = (id: string) =>
-    setLogs(logs.filter((log) => log.id !== id));
+  // 3. ASYNC LOG REMOVAL MUTATION
+  const deleteLog = async (id: string) => {
+    try {
+      await deleteLogFromDB(id); // Clear records out of IndexedDB store safely
+      setLogs((prev) => prev.filter((log) => log.id !== id));
+    } catch (err) {
+      console.error("Database deletion failed:", err);
+      alert("Error: Failed to delete transaction index safely from database.");
+    }
+  };
 
+  // 4. ASYNC ANCHOR SETTINGS WRITER
+  const updateSettings = async (newSettings: Settings) => {
+    try {
+      await saveSettingsToDB(newSettings);
+      setSettingsState(newSettings);
+    } catch (err) {
+      console.error("Database settings save failed:", err);
+      alert("Error: Core nomad location configurations failed to save.");
+    }
+  };
+
+  // --- STATISTICAL MEMO REDUCERS ---
   const totalSpent = logs.reduce((sum, log) => sum + log.amount, 0);
   const totalTransport = logs
     .filter(
@@ -233,9 +273,10 @@ export default function App() {
         )}
         {currentTab === "settings" && (
           <SettingsScreen
+            logs={logs}
             settings={settings}
-            setSettings={setSettings}
-            setLogs={setLogs}
+            setSettings={updateSettings} // Relays async writer downstream
+            setLogs={setLogs} // Needed for wholesale array sync imports
           />
         )}
       </div>
